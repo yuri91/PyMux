@@ -2,7 +2,7 @@
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Vte', '2.91')
-from gi.repository import Gtk, Vte
+from gi.repository import Gtk, Gdk, Vte
 from gi.repository import GLib
 import os
 import time
@@ -37,7 +37,10 @@ win.show_all()
 tmux = pexpect.spawn("tmux -CC")
 
 def keypressed(widget,event):
-    tmux.sendline(b"send-keys "+event.string.encode())
+    key = event.string.encode()
+    if event.keyval == Gdk.KEY_Return:
+        key = b"Enter"
+    tmux.sendline(b"send-keys "+key)
 
 win.connect('key-press-event', keypressed)
 
