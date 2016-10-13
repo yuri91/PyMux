@@ -6,8 +6,9 @@ from gi.repository import Gtk, Vte
 from gi.repository import GLib
 import os
 import time
-import subprocess
+import pexpect
 import threading
+import re
 
 def new_term():
     terminal = Vte.Terminal()
@@ -33,44 +34,51 @@ grid.attach(new_term(),1,0,2,1)
 win.add(grid)
 win.show_all()
 
-tmux = subprocess.Popen(["tmux","-C"],stdout=subprocess.PIPE,stdin=None)
+tmux = pexpect.spawn("tmux -CC")
+
+def keypressed(widget,event):
+    tmux.sendline(b"send-keys "+event.string.encode())
+
+win.connect('key-press-event', keypressed)
 
 class UpdateThread(threading.Thread):
     def __init__(self, tmux):
         super(UpdateThread,self).__init__()
-        self._stop = threading.Event()
+        self.stop_event = threading.Event()
         self.tmux = tmux
 
     def stop(self):
-        self._stop.set()
-        self.tmux.wait()
+        self.stop_event.set()
 
     def handle_begin(self,cmd):
-        pass
+        print("begin: ",cmd)
     def handle_end(self,cmd):
-        pass
+        print("end: ",cmd)
     def handle_output(self,cmd):
-        cmd = b" ".join(cmd.split()[2:])
-        out = cmd.decode('unicode_escape').encode()
+        r = re.search(rb'%output %([0-9]*) (.*)',cmd)
+        out = r.group(2).decode('unicode_escape').encode()
         t1.feed(out)
     def run(self):
-        for l in self.tmux.stdout:
-            if self._stop.isSet():
-                break
-            if l.startswith(b"%begin"):
-                self.handle_begin(l)
-            elif l.startswith(b"%end"):
-                self.handle_end(l)
-            elif l.startswith(b"%output"):
-                self.handle_output(l)
-            else:
-                print("unsupported command: ",l)
-        tmux.terminate()
+        while not self.stop_event.isSet():
+            cmd = self.tmux.readline()
+            if not cmd.endswith(b"\r\n"):
+                print("tmux died, exiting now.")
+                exit(-1)
 
-    
+            cmd = cmd.strip()
+            if cmd.startswith(b"%begin"):
+                self.handle_begin(cmd)
+            elif cmd.startswith(b"%end"):
+                self.handle_end(cmd)
+            elif cmd.startswith(b"%output"):
+                self.handle_output(cmd)
+            else:
+                print("unsupported command: ",cmd)
+        tmux.terminate()
 
 t = UpdateThread(tmux)
 t.start()
 
 Gtk.main()
 t.stop()
+t.join()
