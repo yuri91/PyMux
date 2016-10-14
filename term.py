@@ -34,7 +34,7 @@ grid.attach(new_term(),1,0,2,1)
 win.add(grid)
 win.show_all()
 
-tmux = pexpect.spawn("tmux -CC")
+tmux = pexpect.spawn("tmux -CC", timeout=0.5)
 
 def keypressed(widget,event):
     key = event.string.encode()
@@ -45,10 +45,11 @@ def keypressed(widget,event):
 win.connect('key-press-event', keypressed)
 
 class UpdateThread(threading.Thread):
-    def __init__(self, tmux):
+    def __init__(self, tmux, grid):
         super(UpdateThread,self).__init__()
         self.stop_event = threading.Event()
         self.tmux = tmux
+        self.grid = grid
 
     def stop(self):
         self.stop_event.set()
@@ -57,13 +58,21 @@ class UpdateThread(threading.Thread):
         print("begin: ",cmd)
     def handle_end(self,cmd):
         print("end: ",cmd)
+    def handle_exit(self,cmd):
+        print("exit: ",cmd)
+        self.stop_event.set()
+    def handle_window_add(self,cmd):
+        print("window-add: ",cmd)
     def handle_output(self,cmd):
         r = re.search(rb'%output %([0-9]*) (.*)',cmd)
         out = r.group(2).decode('unicode_escape').encode()
         t1.feed(out)
     def run(self):
         while not self.stop_event.isSet():
-            cmd = self.tmux.readline()
+            try:
+                cmd = self.tmux.readline()
+            except:
+                pass
             if not cmd.endswith(b"\r\n"):
                 print("tmux died, exiting now.")
                 exit(-1)
@@ -75,11 +84,15 @@ class UpdateThread(threading.Thread):
                 self.handle_end(cmd)
             elif cmd.startswith(b"%output"):
                 self.handle_output(cmd)
+            elif cmd.startswith(b"%exit"):
+                self.handle_exit(cmd)
+            elif cmd.startswith(b"%window-add"):
+                self.handle_window_add(cmd)
             else:
                 print("unsupported command: ",cmd)
         tmux.terminate()
 
-t = UpdateThread(tmux)
+t = UpdateThread(tmux, grid)
 t.start()
 
 Gtk.main()
